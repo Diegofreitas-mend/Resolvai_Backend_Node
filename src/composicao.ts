@@ -15,6 +15,8 @@ import { PedidoRepository } from './infrastructure/repositories/pedido-repositor
 import { UserRepository } from './infrastructure/repositories/user-repository.js';
 import { SupabaseAuthClient } from './infrastructure/security/supabase-auth-client.js';
 import { SupabaseStorage } from './infrastructure/storage/supabase-storage.js';
+import { PrestadorPublicoService } from './application/services/prestador-publico-service.js';
+import { PrestadorPublicoQueries } from './infrastructure/repositories/prestador-publico-queries.js';
 
 /**
  * Raiz de composição: liga serviços, repositórios e clientes externos
@@ -26,6 +28,7 @@ export function criarDependencias(config: AppConfig, database: Database = create
 
   return {
     database,
+    prestadorPublicoService: new PrestadorPublicoService(new PrestadorPublicoQueries(database)),
     userRepository,
     authService: new AuthService(userRepository, supabaseAuthClient),
     userService: new UserService(userRepository, new EnderecoRepository(database), new ContatoRepository(database), supabaseAuthClient),
