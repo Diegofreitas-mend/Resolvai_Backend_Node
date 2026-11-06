@@ -14,8 +14,6 @@ import { criarVerificadorDeToken } from '../src/api/authentication.js';
 import { ServicoIndisponivelException } from '../src/application/errors.js';
 import { AssistentePedidoService } from '../src/application/services/assistente-pedido-service.js';
 import { AuthService } from '../src/application/services/auth-service.js';
-import { PrestadorPublicoService } from '../src/application/services/prestador-publico-service.js';
-import { PrestadorPublicoQueries } from '../src/infrastructure/repositories/prestador-publico-queries.js';
 import { FotoPedidoService } from '../src/application/services/foto-pedido-service.js';
 import { PedidoService } from '../src/application/services/pedido-service.js';
 import { UserService } from '../src/application/services/user-service.js';
@@ -26,6 +24,8 @@ import { PedidoQueries } from '../src/infrastructure/repositories/pedido-queries
 import { PedidoRepository } from '../src/infrastructure/repositories/pedido-repository.js';
 import { UserRepository } from '../src/infrastructure/repositories/user-repository.js';
 import { FakeArmazenamento, FakeAssistente, FakeSupabase } from './fakes.js';
+import { PrestadorPublicoService } from '../src/application/services/prestador-publico-service.js';
+import { PrestadorPublicoQueries } from '../src/infrastructure/repositories/prestador-publico-queries.js';
 
 // PostgreSQL real (PGlite, em memória) com os mesmos scripts de db/scripts, acessado pelo driver pg da API.
 const issuer = 'https://projeto-teste.supabase.co/auth/v1';
@@ -133,12 +133,12 @@ describe('Integração com PostgreSQL', () => {
     app = await buildApp({
       logger: process.env.DEBUG_LOG ? { level: 'error' } : false,
       dependencias: {
-        prestadorPublicoService: new PrestadorPublicoService(new PrestadorPublicoQueries(database)),
         userRepository: users,
         authService: new AuthService(users, supabase),
         userService: new UserService(users, new EnderecoRepository(database), new ContatoRepository(database), supabase),
         pedidoService: new PedidoService(new PedidoQueries(database), new PedidoRepository(database), users),
         fotoPedidoService: new FotoPedidoService(armazenamento, users),
+        prestadorPublicoService: new PrestadorPublicoService(new PrestadorPublicoQueries(database)),
         assistentePedidoService: new AssistentePedidoService(assistente),
         verificarToken: criarVerificadorDeToken({ authIssuer: issuer, audience: 'authenticated', jwtSecret: segredo })
       }
@@ -500,12 +500,6 @@ describe('Integração com PostgreSQL', () => {
     });
   });
 
-  it('health check responde sem autenticação', async () => {
-    const resposta = await app.inject({ method: 'GET', url: '/health' });
-    expect(resposta.statusCode).toBe(200);
-    expect(resposta.json()).toEqual({ status: 'ok' });
-  });
-
   describe('perfil público (#93)', () => {
     it('retorna somente dados disponíveis na main e protege acessos', async () => {
       const path = `/api/v1/providers/${ids.prestador}/public-profile`;
@@ -517,8 +511,9 @@ describe('Integração com PostgreSQL', () => {
       expect((await chamar('GET', `/api/v1/providers/${ids.cliente}/public-profile`, ids.cliente)).statusCode).toBe(404);
       const result = await chamar('GET', path, ids.cliente);
       expect(result.statusCode).toBe(200);
+      const reviewsInstalled = (await database.query<{ installed: boolean }>("select to_regclass('public.avaliacoes') is not null as installed"))[0]!.installed;
       expect(result.json()).toEqual({ id: ids.prestador, name: 'Pedro Prestador', photoUrl: null, region: null,
-        categories: null, completedServices: 0, reviewsAvailable: false, reviewsCount: null, averageRating: null, reviews: [] });
+        categories: null, completedServices: 0, reviewsAvailable: reviewsInstalled, reviewsCount: reviewsInstalled ? 0 : null, averageRating: null, reviews: [] });
       expect(result.headers['cache-control']).toContain('no-store');
     });
 
@@ -529,17 +524,24 @@ describe('Integração com PostgreSQL', () => {
       await database.query('create table fornecedores (id_usuario uuid primary key, nome_exibicao text, cidade_atuacao text, uf_atuacao text, cnpj text)');
       await database.query('create table especialidades (codigo text primary key, nome text, is_active boolean)');
       await database.query('create table fornecedor_especialidades (id_usuario uuid, codigo_especialidade text)');
-      await database.query('create table avaliacoes (id_pedido uuid primary key, id_prestador uuid, nota smallint, comentario text, data_criacao timestamptz)');
-      await database.query("insert into fornecedores values ($1, 'Nome profissional', 'Fortaleza', 'CE', 'documento privado')", [ids.prestador]);
+      await database.query('create table if not exists avaliacoes (id_pedido uuid primary key, id_cliente uuid, id_prestador uuid, nota smallint, comentario text, data_criacao timestamptz)');
+      const providerId = randomUUID();
+      await database.query("insert into users (id, name, email, role) values ($1, 'Prestador do perfil', 'perfil-isolado@teste.com', 'Prestador')", [providerId]);
+      await database.query("insert into fornecedores values ($1, 'Nome profissional', 'Fortaleza', 'CE', 'documento privado')", [providerId]);
       await database.query("insert into especialidades values ('eletrica', 'Elétrica', true), ('pintura', 'Pintura', false)");
-      await database.query("insert into fornecedor_especialidades values ($1, 'eletrica'), ($1, 'pintura')", [ids.prestador]);
+      await database.query("insert into fornecedor_especialidades values ($1, 'eletrica'), ($1, 'pintura')", [providerId]);
       const completed = randomUUID();
       await database.query("insert into pedidos (id, id_cliente, status) values ($1, $2, 'concluido')", [completed, ids.cliente]);
       // Duplicidade legada de propostas não deve duplicar a contagem de serviços.
-      await database.query("insert into propostas (id_pedido, id_prestador, status, valor) values ($1, $2, 'escolhida', 100), ($1, $2, 'escolhida', 100)", [completed, ids.prestador]);
-      for (let index = 0; index < 6; index++) await database.query("insert into avaliacoes values ($1, $2, $3, $4, now() - $5 * interval '1 day')", [randomUUID(), ids.prestador, index === 5 ? 1 : 5, index === 0 ? '<script>não executar</script>' : null, index]);
-      const result = (await chamar('GET', `/api/v1/providers/${ids.prestador}/public-profile`, ids.cliente)).json();
-      expect(result).toMatchObject({ name: 'Nome profissional', region: 'Fortaleza, CE', categories: ['Elétrica'], completedServices: 1, reviewsAvailable: true });
+      await database.query("insert into propostas (id_pedido, id_prestador, status, valor) values ($1, $2, 'escolhida', 100), ($1, $2, 'escolhida', 100)", [completed, providerId]);
+      for (let index = 0; index < 6; index++) {
+        const orderId = randomUUID();
+        await database.query("insert into pedidos (id, id_cliente, status) values ($1, $2, 'concluido')", [orderId, ids.cliente]);
+        await database.query("insert into propostas (id_pedido, id_prestador, status, valor) values ($1, $2, 'escolhida', 100)", [orderId, providerId]);
+        await database.query("insert into avaliacoes (id_pedido, id_cliente, id_prestador, nota, comentario, data_criacao) values ($1, $2, $3, $4, $5, now() - $6 * interval '1 day')", [orderId, ids.cliente, providerId, index === 5 ? 1 : 5, index === 0 ? '<script>não executar</script>' : null, index]);
+      }
+      const result = (await chamar('GET', `/api/v1/providers/${providerId}/public-profile`, ids.cliente)).json();
+      expect(result).toMatchObject({ name: 'Nome profissional', region: 'Fortaleza, CE', categories: ['Elétrica'], completedServices: 7, reviewsAvailable: true });
       expect(result.averageRating).toBeCloseTo(26 / 6);
       expect(result.reviewsCount).toBe(6);
       expect(result.reviews).toHaveLength(5);
@@ -548,5 +550,11 @@ describe('Integração com PostgreSQL', () => {
       const spec = (await app.inject('/openapi/v1.json')).json();
       expect(spec.paths['/api/v1/providers/{id}/public-profile'].get.security).toEqual([{ Bearer: [] }]);
     });
+  });
+
+  it('health check responde sem autenticação', async () => {
+    const resposta = await app.inject({ method: 'GET', url: '/health' });
+    expect(resposta.statusCode).toBe(200);
+    expect(resposta.json()).toEqual({ status: 'ok' });
   });
 });
