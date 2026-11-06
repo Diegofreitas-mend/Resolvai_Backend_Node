@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { before, after, test } from 'node:test'
-import { account, api, call, cleanup, code, db, guard, prepare, start } from './support.mjs'
+import { account, call, cleanup, code, db, guard, prepare, start } from './support.mjs'
 
 let child
 before(async () => { await prepare(); child = await start() })
