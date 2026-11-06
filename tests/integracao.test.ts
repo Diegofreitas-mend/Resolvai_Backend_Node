@@ -518,7 +518,7 @@ describe('Integração com PostgreSQL', () => {
       const result = await chamar('GET', path, ids.cliente);
       expect(result.statusCode).toBe(200);
       expect(result.json()).toEqual({ id: ids.prestador, name: 'Pedro Prestador', photoUrl: null, region: null,
-        categories: null, completedServices: 0, reviewsAvailable: false, averageRating: null, reviews: [] });
+        categories: null, completedServices: 0, reviewsAvailable: false, reviewsCount: null, averageRating: null, reviews: [] });
       expect(result.headers['cache-control']).toContain('no-store');
     });
 
@@ -541,6 +541,7 @@ describe('Integração com PostgreSQL', () => {
       const result = (await chamar('GET', `/api/v1/providers/${ids.prestador}/public-profile`, ids.cliente)).json();
       expect(result).toMatchObject({ name: 'Nome profissional', region: 'Fortaleza, CE', categories: ['Elétrica'], completedServices: 1, reviewsAvailable: true });
       expect(result.averageRating).toBeCloseTo(26 / 6);
+      expect(result.reviewsCount).toBe(6);
       expect(result.reviews).toHaveLength(5);
       expect(result.reviews[0].comment).toBe('<script>não executar</script>');
       for (const field of ['email', 'cpf', 'cnpj', 'endereco', 'id_cliente', 'id_pedido']) expect(JSON.stringify(result)).not.toContain(`"${field}"`);

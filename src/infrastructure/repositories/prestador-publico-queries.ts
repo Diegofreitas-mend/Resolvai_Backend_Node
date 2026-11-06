@@ -23,7 +23,7 @@ export class PrestadorPublicoQueries implements IPrestadorPublicoQueries {
           and to_regclass('public.fornecedor_especialidades') is not null) as metadata,
         (to_regclass('public.avaliacoes') is not null) as reviews`);
       const profile: PrestadorPublico = { ...provider, photoUrl: null, categories: null, region: null,
-        reviewsAvailable: tables!.reviews, averageRating: null, reviews: [] };
+        reviewsAvailable: tables!.reviews, reviewsCount: null, averageRating: null, reviews: [] };
       if (tables!.metadata) {
         const [metadata] = await sql.query<{ name: string; region: string }>(`
           select nome_exibicao as name, cidade_atuacao || ', ' || uf_atuacao as region
@@ -39,8 +39,9 @@ export class PrestadorPublicoQueries implements IPrestadorPublicoQueries {
       }
       if (tables!.reviews) {
         // Contrato da migration da #92; nenhuma cópia de commits ou migration daquela issue.
-        const [average] = await sql.query<{ value: number | null }>('select avg(nota)::numeric as value from public.avaliacoes where id_prestador = $1', [id]);
+        const [average] = await sql.query<{ value: number | null; count: number }>('select avg(nota)::numeric as value, count(*) as count from public.avaliacoes where id_prestador = $1', [id]);
         profile.averageRating = average!.value;
+        profile.reviewsCount = average!.count;
         const reviews = await sql.query<{ rating: number; comment: string | null; createdAt: Date }>(`
           select nota as rating, comentario as comment, data_criacao as "createdAt"
           from public.avaliacoes where id_prestador = $1 order by data_criacao desc, id_pedido desc limit 5`, [id]);
