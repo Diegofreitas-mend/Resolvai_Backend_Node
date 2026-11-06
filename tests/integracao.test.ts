@@ -527,6 +527,8 @@ describe('Integração com PostgreSQL', () => {
       await database.query('create table if not exists avaliacoes (id_pedido uuid primary key, id_cliente uuid, id_prestador uuid, nota smallint, comentario text, data_criacao timestamptz)');
       const providerId = randomUUID();
       await database.query("insert into users (id, name, email, role) values ($1, 'Prestador do perfil', 'perfil-isolado@teste.com', 'Prestador')", [providerId]);
+      const reviewCustomerId = randomUUID();
+      await database.query("insert into users (id, name, email, role) values ($1, 'Cliente das avaliações do perfil', 'avaliacoes-perfil@teste.com', 'Cliente')", [reviewCustomerId]);
       await database.query("insert into fornecedores values ($1, 'Nome profissional', 'Fortaleza', 'CE', 'documento privado')", [providerId]);
       await database.query("insert into especialidades values ('eletrica', 'Elétrica', true), ('pintura', 'Pintura', false)");
       await database.query("insert into fornecedor_especialidades values ($1, 'eletrica'), ($1, 'pintura')", [providerId]);
@@ -536,9 +538,9 @@ describe('Integração com PostgreSQL', () => {
       await database.query("insert into propostas (id_pedido, id_prestador, status, valor) values ($1, $2, 'escolhida', 100), ($1, $2, 'escolhida', 100)", [completed, providerId]);
       for (let index = 0; index < 6; index++) {
         const orderId = randomUUID();
-        await database.query("insert into pedidos (id, id_cliente, status) values ($1, $2, 'concluido')", [orderId, ids.cliente]);
+        await database.query("insert into pedidos (id, id_cliente, status) values ($1, $2, 'concluido')", [orderId, reviewCustomerId]);
         await database.query("insert into propostas (id_pedido, id_prestador, status, valor) values ($1, $2, 'escolhida', 100)", [orderId, providerId]);
-        await database.query("insert into avaliacoes (id_pedido, id_cliente, id_prestador, nota, comentario, data_criacao) values ($1, $2, $3, $4, $5, now() - $6 * interval '1 day')", [orderId, ids.cliente, providerId, index === 5 ? 1 : 5, index === 0 ? '<script>não executar</script>' : null, index]);
+        await database.query("insert into avaliacoes (id_pedido, id_cliente, id_prestador, nota, comentario, data_criacao) values ($1, $2, $3, $4, $5, now() - $6 * interval '1 day')", [orderId, reviewCustomerId, providerId, index === 5 ? 1 : 5, index === 0 ? '<script>não executar</script>' : null, index]);
       }
       const result = (await chamar('GET', `/api/v1/providers/${providerId}/public-profile`, ids.cliente)).json();
       expect(result).toMatchObject({ name: 'Nome profissional', region: 'Fortaleza, CE', categories: ['Elétrica'], completedServices: 7, reviewsAvailable: true });
